@@ -232,7 +232,7 @@
               email: data.user.email,
               role: data.user.role
             }));
-            const redirect = data.user.role === 'admin' ? '../admin/admin-dashboard.html' : 'user-dashboard.html';
+            const redirect = data.user.role === 'admin' ? '../admin/admin-dashboard.html' : '../user/user-dashboard.html';
             window.location.href = redirect;
           } else {
             document.getElementById('loginAlertMsg').textContent = data.message || 'Invalid email or password.';

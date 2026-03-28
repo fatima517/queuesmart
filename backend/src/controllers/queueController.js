@@ -1,4 +1,5 @@
 const store = require('../data/store')
+const { estimateWaitTime } = require('../utils/waitTimeEstimator')
 
 const joinQueue = (req, res) => {
   try {
@@ -30,7 +31,7 @@ const joinQueue = (req, res) => {
     }
 
     const position = store.queue.filter(q => q.serviceId === serviceId && q.status === 'waiting').length + 1
-    const waitTime = position * service.expectedDuration
+    const waitTime = estimateWaitTime(position, service.expectedDuration)
 
     const newEntry = {
       queueId: 'q' + Date.now(),
@@ -80,7 +81,7 @@ const getQueueStatus = (req, res) => {
 
     const waitingEntries = store.queue.filter(q => q.serviceId === entry.serviceId && q.status === 'waiting')
     const position = waitingEntries.findIndex(q => q.userId === userId) + 1
-    const waitTime = position * service.expectedDuration
+    const waitTime = estimateWaitTime(position, service.expectedDuration)
 
     entry.position = position
     entry.waitTime = waitTime

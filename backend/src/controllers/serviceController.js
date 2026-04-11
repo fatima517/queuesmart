@@ -1,3 +1,4 @@
+// src/controllers/serviceController.js
 const Service = require('../models/serviceModel');
 
 // List all services

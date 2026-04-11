@@ -1,95 +1,146 @@
+jest.mock('../src/config/db', () => ({ query: jest.fn() }))
+jest.mock('../src/models/queueEntryModel', () => ({
+  joinQueue: jest.fn(),
+  getQueueEntries: jest.fn(),
+  getByUserId: jest.fn(),
+  getById: jest.fn(),
+  updateStatus: jest.fn(),
+  deleteById: jest.fn()
+}))
+jest.mock('../src/models/queueModel', () => ({
+  create: jest.fn(),
+  getById: jest.fn(),
+  getByServiceId: jest.fn(),
+  updateStatus: jest.fn(),
+  deleteById: jest.fn()
+}))
+jest.mock('../src/models/serviceModel', () => ({
+  create: jest.fn(),
+  getAll: jest.fn(),
+  getById: jest.fn(),
+  getByBusinessId: jest.fn(),
+  updateById: jest.fn(),
+  deleteById: jest.fn()
+}))
+jest.mock('../src/models/notificationModel', () => ({
+  create: jest.fn(),
+  getByUserId: jest.fn(),
+  getById: jest.fn(),
+  markAsViewed: jest.fn(),
+  deleteById: jest.fn()
+}))
+
 const request = require('supertest')
 const app = require('../server')
-const store = require('../src/data/store')
+const db = require('../src/config/db')
+const QueueEntry = require('../src/models/queueEntryModel')
+const Queue = require('../src/models/queueModel')
+const Service = require('../src/models/serviceModel')
+const Notification = require('../src/models/notificationModel')
+
+const mockService = { service_id: 1, service_name: 'General Consultation', expected_duration: 10, priority_level: 'medium' }
+const mockQueue = { queue_id: 1, service_id: 1, status: 'open', max_size: 50 }
+const mockEntry = { entry_id: 1, queue_id: 1, user_id: 1, position: 1, join_time: new Date().toISOString(), status: 'waiting' }
 
 beforeEach(() => {
-  store.users = [
-    { id: '1', name: 'John Doe', email: 'john@example.com', password: 'password123', role: 'user' },
-    { id: '2', name: 'Jane Smith', email: 'jane@example.com', password: 'password123', role: 'user' }
-  ]
-  store.services = [
-    { id: '1', name: 'General Consultation', description: 'General help', expectedDuration: 10, priorityLevel: 'normal' },
-    { id: '2', name: 'Technical Support', description: 'Tech help', expectedDuration: 20, priorityLevel: 'high' }
-  ]
-  store.queue = []
-  store.notifications = []
-  store.history = []
+  jest.clearAllMocks()
+  Notification.create.mockImplementation((uid, msg, cb) => cb(null))
 })
 
 describe('POST /api/queue/join', () => {
-  test('should join the queue and return correct wait time', async () => {
-    const res = await request(app)
-      .post('/api/queue/join')
-      .send({ userId: '1', serviceId: '1' })
+  test('should join the queue and return correct position and wait time', async () => {
+    Service.getById.mockImplementation((id, cb) => cb(null, [mockService]))
+    Queue.getByServiceId.mockImplementation((id, cb) => cb(null, [mockQueue]))
+    QueueEntry.getQueueEntries.mockImplementation((id, cb) => cb(null, []))
+    QueueEntry.joinQueue.mockImplementation((qid, uid, pos, cb) => cb(null, { insertId: 1 }))
+
+    const res = await request(app).post('/api/queue/join').send({ user_id: 1, service_id: 1 })
     expect(res.status).toBe(201)
     expect(res.body.queueEntry.position).toBe(1)
     expect(res.body.queueEntry.waitTime).toBe(10)
   })
 
-  test('should calculate wait time as position x service duration', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
-    const res = await request(app)
-      .post('/api/queue/join')
-      .send({ userId: '2', serviceId: '1' })
+  test('should calculate wait time as position x expected_duration', async () => {
+    Service.getById.mockImplementation((id, cb) => cb(null, [mockService]))
+    Queue.getByServiceId.mockImplementation((id, cb) => cb(null, [mockQueue]))
+    QueueEntry.getQueueEntries.mockImplementation((id, cb) => cb(null, [{ ...mockEntry, user_id: 2 }]))
+    QueueEntry.joinQueue.mockImplementation((qid, uid, pos, cb) => cb(null, { insertId: 2 }))
+
+    const res = await request(app).post('/api/queue/join').send({ user_id: 1, service_id: 1 })
     expect(res.status).toBe(201)
     expect(res.body.queueEntry.position).toBe(2)
     expect(res.body.queueEntry.waitTime).toBe(20)
   })
 
-  test('should fail if userId is missing', async () => {
-    const res = await request(app)
-      .post('/api/queue/join')
-      .send({ serviceId: '1' })
+  test('should fail if user_id is missing', async () => {
+    const res = await request(app).post('/api/queue/join').send({ service_id: 1 })
     expect(res.status).toBe(400)
-    expect(res.body.message).toBe('userId and serviceId are required')
+    expect(res.body.message).toBe('user_id and service_id are required')
   })
 
-  test('should fail if serviceId is missing', async () => {
-    const res = await request(app)
-      .post('/api/queue/join')
-      .send({ userId: '1' })
+  test('should fail if service_id is missing', async () => {
+    const res = await request(app).post('/api/queue/join').send({ user_id: 1 })
     expect(res.status).toBe(400)
-    expect(res.body.message).toBe('userId and serviceId are required')
-  })
-
-  test('should fail if user does not exist', async () => {
-    const res = await request(app)
-      .post('/api/queue/join')
-      .send({ userId: '999', serviceId: '1' })
-    expect(res.status).toBe(404)
-    expect(res.body.message).toBe('User not found')
+    expect(res.body.message).toBe('user_id and service_id are required')
   })
 
   test('should fail if service does not exist', async () => {
-    const res = await request(app)
-      .post('/api/queue/join')
-      .send({ userId: '1', serviceId: '999' })
+    Service.getById.mockImplementation((id, cb) => cb(null, []))
+
+    const res = await request(app).post('/api/queue/join').send({ user_id: 1, service_id: 999 })
     expect(res.status).toBe(404)
     expect(res.body.message).toBe('Service not found')
   })
 
-  test('should fail if user is already in a queue', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
-    const res = await request(app)
-      .post('/api/queue/join')
-      .send({ userId: '1', serviceId: '2' })
-    expect(res.status).toBe(409)
-    expect(res.body.message).toBe('User is already in a queue')
+  test('should fail if no open queue exists for the service', async () => {
+    Service.getById.mockImplementation((id, cb) => cb(null, [mockService]))
+    Queue.getByServiceId.mockImplementation((id, cb) => cb(null, [{ ...mockQueue, status: 'closed' }]))
+
+    const res = await request(app).post('/api/queue/join').send({ user_id: 1, service_id: 1 })
+    expect(res.status).toBe(404)
+    expect(res.body.message).toBe('No open queue for this service')
   })
 
-  test('should create a joined notification when user joins', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
-    const notif = store.notifications.find(n => n.userId === '1' && n.type === 'joined')
-    expect(notif).toBeDefined()
-    expect(notif.message).toContain('General Consultation')
-    expect(notif.read).toBe(false)
+  test('should fail if user is already waiting in queue', async () => {
+    Service.getById.mockImplementation((id, cb) => cb(null, [mockService]))
+    Queue.getByServiceId.mockImplementation((id, cb) => cb(null, [mockQueue]))
+    QueueEntry.getQueueEntries.mockImplementation((id, cb) => cb(null, [mockEntry]))
+
+    const res = await request(app).post('/api/queue/join').send({ user_id: 1, service_id: 1 })
+    expect(res.status).toBe(409)
+    expect(res.body.message).toBe('User is already in this queue')
+  })
+
+  test('should fail if queue is full', async () => {
+    const fullQueue = { ...mockQueue, max_size: 1 }
+    Service.getById.mockImplementation((id, cb) => cb(null, [mockService]))
+    Queue.getByServiceId.mockImplementation((id, cb) => cb(null, [fullQueue]))
+    QueueEntry.getQueueEntries.mockImplementation((id, cb) => cb(null, [{ ...mockEntry, user_id: 2 }]))
+
+    const res = await request(app).post('/api/queue/join').send({ user_id: 1, service_id: 1 })
+    expect(res.status).toBe(409)
+    expect(res.body.message).toBe('Queue is full')
+  })
+
+  test('should create a notification when user joins', async () => {
+    Service.getById.mockImplementation((id, cb) => cb(null, [mockService]))
+    Queue.getByServiceId.mockImplementation((id, cb) => cb(null, [mockQueue]))
+    QueueEntry.getQueueEntries.mockImplementation((id, cb) => cb(null, []))
+    QueueEntry.joinQueue.mockImplementation((qid, uid, pos, cb) => cb(null, { insertId: 1 }))
+
+    await request(app).post('/api/queue/join').send({ user_id: 1, service_id: 1 })
+    expect(Notification.create).toHaveBeenCalledWith(1, expect.stringContaining('General Consultation'), expect.any(Function))
   })
 })
 
 describe('GET /api/queue/status/:userId', () => {
-  test('should return correct position and wait time', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
-    store.notifications = []
+  test('should return position, wait time, and service name', async () => {
+    QueueEntry.getByUserId.mockImplementation((id, cb) => cb(null, [mockEntry]))
+    QueueEntry.getQueueEntries.mockImplementation((id, cb) => cb(null, [mockEntry]))
+    Queue.getById.mockImplementation((id, cb) => cb(null, [mockQueue]))
+    Service.getById.mockImplementation((id, cb) => cb(null, [mockService]))
+    Notification.getByUserId.mockImplementation((id, cb) => cb(null, []))
+
     const res = await request(app).get('/api/queue/status/1')
     expect(res.status).toBe(200)
     expect(res.body.position).toBe(1)
@@ -98,31 +149,43 @@ describe('GET /api/queue/status/:userId', () => {
   })
 
   test('should return 404 if user is not in any queue', async () => {
+    QueueEntry.getByUserId.mockImplementation((id, cb) => cb(null, []))
+
     const res = await request(app).get('/api/queue/status/1')
     expect(res.status).toBe(404)
     expect(res.body.message).toBe('User is not in any queue')
   })
 
-  test('should create an almost notification when position is 2 or less', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
-    store.notifications = []
+  test('should trigger almost notification when position is 2 or less', async () => {
+    QueueEntry.getByUserId.mockImplementation((id, cb) => cb(null, [mockEntry]))
+    QueueEntry.getQueueEntries.mockImplementation((id, cb) => cb(null, [mockEntry]))
+    Queue.getById.mockImplementation((id, cb) => cb(null, [mockQueue]))
+    Service.getById.mockImplementation((id, cb) => cb(null, [mockService]))
+    Notification.getByUserId.mockImplementation((id, cb) => cb(null, []))
+
     await request(app).get('/api/queue/status/1')
-    const almostNotif = store.notifications.find(n => n.userId === '1' && n.type === 'almost')
-    expect(almostNotif).toBeDefined()
+    expect(Notification.create).toHaveBeenCalledWith(1, expect.stringContaining('almost up'), expect.any(Function))
   })
 
   test('should not create duplicate almost notifications', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
-    store.notifications = []
+    const existingAlmost = { notification_id: 99, user_id: 1, message: 'You are almost up!', status: 'sent' }
+    QueueEntry.getByUserId.mockImplementation((id, cb) => cb(null, [mockEntry]))
+    QueueEntry.getQueueEntries.mockImplementation((id, cb) => cb(null, [mockEntry]))
+    Queue.getById.mockImplementation((id, cb) => cb(null, [mockQueue]))
+    Service.getById.mockImplementation((id, cb) => cb(null, [mockService]))
+    Notification.getByUserId.mockImplementation((id, cb) => cb(null, [existingAlmost]))
+
     await request(app).get('/api/queue/status/1')
-    await request(app).get('/api/queue/status/1')
-    const almostNotifs = store.notifications.filter(n => n.userId === '1' && n.type === 'almost')
-    expect(almostNotifs.length).toBe(1)
+    expect(Notification.create).not.toHaveBeenCalled()
   })
 
   test('should recalculate wait time based on current position', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
-    await request(app).post('/api/queue/join').send({ userId: '2', serviceId: '1' })
+    const entry2 = { ...mockEntry, entry_id: 2, user_id: 2, position: 2 }
+    QueueEntry.getByUserId.mockImplementation((id, cb) => cb(null, [entry2]))
+    QueueEntry.getQueueEntries.mockImplementation((id, cb) => cb(null, [mockEntry, entry2]))
+    Queue.getById.mockImplementation((id, cb) => cb(null, [mockQueue]))
+    Service.getById.mockImplementation((id, cb) => cb(null, [mockService]))
+
     const res = await request(app).get('/api/queue/status/2')
     expect(res.body.position).toBe(2)
     expect(res.body.waitTime).toBe(20)
@@ -131,43 +194,43 @@ describe('GET /api/queue/status/:userId', () => {
 
 describe('DELETE /api/queue/leave/:userId', () => {
   test('should leave queue successfully', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
+    QueueEntry.getByUserId.mockImplementation((id, cb) => cb(null, [mockEntry]))
+    QueueEntry.updateStatus.mockImplementation((id, status, cb) => cb(null))
+
     const res = await request(app).delete('/api/queue/leave/1')
     expect(res.status).toBe(200)
     expect(res.body.message).toBe('Left queue successfully')
   })
 
-  test('should add to history when leaving', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
-    store.history = []
-    await request(app).delete('/api/queue/leave/1')
-    const historyEntry = store.history.find(h => h.userId === '1' && h.outcome === 'left')
-    expect(historyEntry).toBeDefined()
-  })
-
   test('should fail if user is not in any queue', async () => {
+    QueueEntry.getByUserId.mockImplementation((id, cb) => cb(null, []))
+
     const res = await request(app).delete('/api/queue/leave/1')
     expect(res.status).toBe(404)
     expect(res.body.message).toBe('User is not in any queue')
   })
 
-  test('should remove user from queue', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
+  test('should mark the entry as canceled', async () => {
+    QueueEntry.getByUserId.mockImplementation((id, cb) => cb(null, [mockEntry]))
+    QueueEntry.updateStatus.mockImplementation((id, status, cb) => cb(null))
+
     await request(app).delete('/api/queue/leave/1')
-    const entry = store.queue.find(q => q.userId === '1')
-    expect(entry).toBeUndefined()
+    expect(QueueEntry.updateStatus).toHaveBeenCalledWith(1, 'canceled', expect.any(Function))
   })
 })
 
 describe('GET /api/queue', () => {
-  test('should return all queue entries', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
+  test('should return all waiting queue entries', async () => {
+    db.query.mockImplementation((query, cb) => cb(null, [{ ...mockEntry, service_name: 'General Consultation', expected_duration: 10 }]))
+
     const res = await request(app).get('/api/queue')
     expect(res.status).toBe(200)
     expect(res.body.length).toBe(1)
   })
 
   test('should return empty array when queue is empty', async () => {
+    db.query.mockImplementation((query, cb) => cb(null, []))
+
     const res = await request(app).get('/api/queue')
     expect(res.status).toBe(200)
     expect(res.body).toEqual([])
@@ -176,38 +239,38 @@ describe('GET /api/queue', () => {
 
 describe('POST /api/queue/serve-next', () => {
   test('should serve the next person in queue', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
+    db.query.mockImplementationOnce((query, cb) => cb(null, [{ ...mockEntry, service_id: 1 }]))
+    QueueEntry.updateStatus.mockImplementation((id, status, cb) => cb(null))
+    Service.getById.mockImplementation((id, cb) => cb(null, [mockService]))
+
     const res = await request(app).post('/api/queue/serve-next')
     expect(res.status).toBe(200)
-    expect(res.body.served.userId).toBe('1')
+    expect(res.body.served.user_id).toBe(1)
   })
 
   test('should fail when queue is empty', async () => {
+    db.query.mockImplementationOnce((query, cb) => cb(null, []))
+
     const res = await request(app).post('/api/queue/serve-next')
     expect(res.status).toBe(404)
     expect(res.body.message).toBe('No one in queue')
   })
 
   test('should create a served notification', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
-    store.notifications = []
+    db.query.mockImplementationOnce((query, cb) => cb(null, [{ ...mockEntry, service_id: 1 }]))
+    QueueEntry.updateStatus.mockImplementation((id, status, cb) => cb(null))
+    Service.getById.mockImplementation((id, cb) => cb(null, [mockService]))
+
     await request(app).post('/api/queue/serve-next')
-    const notif = store.notifications.find(n => n.userId === '1' && n.type === 'served')
-    expect(notif).toBeDefined()
-    expect(notif.read).toBe(false)
+    expect(Notification.create).toHaveBeenCalledWith(1, expect.stringContaining("It's your turn"), expect.any(Function))
   })
 
-  test('should add to history when served', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
-    store.history = []
-    await request(app).post('/api/queue/serve-next')
-    const historyEntry = store.history.find(h => h.userId === '1' && h.outcome === 'served')
-    expect(historyEntry).toBeDefined()
-  })
+  test('should update entry status to served', async () => {
+    db.query.mockImplementationOnce((query, cb) => cb(null, [{ ...mockEntry, service_id: 1 }]))
+    QueueEntry.updateStatus.mockImplementation((id, status, cb) => cb(null))
+    Service.getById.mockImplementation((id, cb) => cb(null, [mockService]))
 
-  test('should remove served person from queue', async () => {
-    await request(app).post('/api/queue/join').send({ userId: '1', serviceId: '1' })
     await request(app).post('/api/queue/serve-next')
-    expect(store.queue.length).toBe(0)
+    expect(QueueEntry.updateStatus).toHaveBeenCalledWith(1, 'served', expect.any(Function))
   })
 })

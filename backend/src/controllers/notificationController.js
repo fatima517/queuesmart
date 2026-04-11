@@ -1,38 +1,28 @@
-const store = require('../data/store')
+const Notification = require('../models/notificationModel')
 
 const getUserNotifications = (req, res) => {
-  try {
-    const { userId } = req.params
+  const user_id = parseInt(req.params.userId)
+  if (isNaN(user_id)) return res.status(400).json({ message: 'userId is required' })
 
-    if (!userId) {
-      return res.status(400).json({ message: 'userId is required' })
-    }
-
-    const userNotifications = store.notifications.filter(n => n.userId === userId)
-    res.status(200).json(userNotifications)
-  } catch (error) {
-    res.status(500).json({ message: 'Error fetching notifications' })
-  }
+  Notification.getByUserId(user_id, (err, notifications) => {
+    if (err) return res.status(500).json({ message: 'Error fetching notifications' })
+    res.status(200).json(notifications)
+  })
 }
 
 const markAsRead = (req, res) => {
-  try {
-    const { id } = req.params
+  const notification_id = parseInt(req.params.id)
+  if (isNaN(notification_id)) return res.status(400).json({ message: 'Notification id is required' })
 
-    if (!id) {
-      return res.status(400).json({ message: 'Notification id is required' })
-    }
+  Notification.getById(notification_id, (err, results) => {
+    if (err) return res.status(500).json({ message: 'Error updating notification' })
+    if (results.length === 0) return res.status(404).json({ message: 'Notification not found' })
 
-    const notification = store.notifications.find(n => n.id === id)
-    if (!notification) {
-      return res.status(404).json({ message: 'Notification not found' })
-    }
-
-    notification.read = true
-    res.status(200).json({ message: 'Notification marked as read', notification })
-  } catch (error) {
-    res.status(500).json({ message: 'Error updating notification' })
-  }
+    Notification.markAsViewed(notification_id, (err) => {
+      if (err) return res.status(500).json({ message: 'Error updating notification' })
+      res.status(200).json({ message: 'Notification marked as read', notification: { ...results[0], status: 'viewed' } })
+    })
+  })
 }
 
 module.exports = { getUserNotifications, markAsRead }

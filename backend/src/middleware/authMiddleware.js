@@ -1,6 +1,6 @@
-const store = require('../data/store')
+const User = require('../models/userModel')
 
-// Reads x-user-id header, finds the user in store, and attaches to req.user
+// Reads x-user-id header, queries the DB, and attaches the user to req.user
 const authenticate = (req, res, next) => {
   const userId = req.headers['x-user-id']
 
@@ -8,13 +8,18 @@ const authenticate = (req, res, next) => {
     return res.status(401).json({ message: 'Authentication required' })
   }
 
-  const user = store.users.find(u => u.id === userId)
-  if (!user) {
-    return res.status(401).json({ message: 'Invalid user' })
-  }
+  User.getById(userId, (err, results) => {
+    if (err) {
+      return res.status(500).json({ message: 'Database error' })
+    }
+    if (!results || results.length === 0) {
+      return res.status(401).json({ message: 'Invalid user' })
+    }
 
-  req.user = { id: user.id, name: user.name, email: user.email, role: user.role }
-  next()
+    const user = results[0]
+    req.user = { id: user.user_id, email: user.email, role: user.role }
+    next()
+  })
 }
 
 // Must be used after authenticate — rejects non-admin users

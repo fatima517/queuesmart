@@ -30,6 +30,7 @@ const register = (req, res) => {
 
   const normalizedEmail = email.toLowerCase();
 
+  // Check if user already exists
   User.findByEmail(normalizedEmail, async (err, results) => {
     if (err) {
       return res.status(500).json({ message: 'Database error' });
@@ -42,6 +43,7 @@ const register = (req, res) => {
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
 
+      // Create user
       User.create(normalizedEmail, hashedPassword, 'user', (err, result) => {
         if (err) {
           return res.status(500).json({ message: 'Error creating user' });
@@ -49,6 +51,7 @@ const register = (req, res) => {
 
         const userId = result.insertId;
 
+        // Create profile
         Profile.create(userId, name, phone, preferences, (err) => {
           if (err) {
             return res.status(500).json({ message: 'Error creating profile' });
